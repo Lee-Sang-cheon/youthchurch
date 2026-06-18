@@ -1,0 +1,27 @@
+name: church_metaverse
+description: "교회 메타버스 · 청년부 라운지 (Flutter 포팅)"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  # 한글 폰트를 쓰고 싶다면 Pretendard 폰트 파일을 assets/fonts/에 넣고 아래 주석을 해제하세요.
+  # fonts:
+  #   - family: Pretendard
+  #     fonts:
+  #       - asset: assets/fonts/Pretendard-Regular.otf
+  #       - asset: assets/fonts/Pretendard-Bold.otf
+  #         weight: 700
+  #       - asset: assets/fonts/Pretendard-ExtraBold.otf
+  #         weight: 800
