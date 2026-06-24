@@ -6,6 +6,7 @@ import '../../../core/widgets/glass.dart';
 import '../../home/data/prayer_repository.dart';
 import '../../auth/presentation/church_setup_page.dart';
 import '../data/church_presence_service.dart';
+import '../data/notification_repository.dart';
 import 'prayer_room_page.dart';
 import 'worship_hall_page.dart';
 import 'small_group_room_page.dart';
@@ -29,7 +30,9 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
   int? _selectedUserId;
   String? _myLatestPrayer;
   List<AvatarUser> _onlineUsers = [];
+  int _unreadCount = 0;
   final _presence = ChurchPresenceService();
+  final _notifRepo = NotificationRepository();
 
   // 내 아바타 위치 (화면 % 기준, 0~100)
   double _selfX = 50;
@@ -39,6 +42,12 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
   void initState() {
     super.initState();
     _loadLatestPrayer();
+    _loadUnreadCount();
+  }
+
+  Future<void> _loadUnreadCount() async {
+    final count = await _notifRepo.getUnreadCount();
+    if (mounted) setState(() => _unreadCount = count);
   }
 
   Future<void> _loadLatestPrayer() async {
@@ -100,11 +109,8 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 배경 + 씬 (non-positioned → StackFit.expand으로 꽉 채움)
           _buildScene(),
-          // 상단 바
           Positioned(top: 0, left: 0, right: 0, child: _buildTopBar()),
-          // 바텀 네비게이션
           _buildBottomNav(),
         ],
       ),
@@ -215,17 +221,7 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
   }
 
   void _enterWorshipHall() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (_) => _WorshipEntrySheet(
-        onEnter: () {
-          Navigator.pop(context);
-          Navigator.push(context, MaterialPageRoute(builder: (_) => const WorshipHallPage()));
-        },
-      ),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const WorshipHallPage()));
   }
 
   void _showMySmallGroups() {
@@ -311,6 +307,45 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
                     Text('초대', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AC.light)),
                   ],
                 ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => _NotificationsPageMain(notifRepo: _notifRepo),
+                  ),
+                ).then((_) async {
+                  await _notifRepo.markAllAsRead();
+                  _loadUnreadCount();
+                });
+              },
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Glass(
+                    radius: 999,
+                    padding: const EdgeInsets.all(10),
+                    child: const Icon(Icons.notifications_outlined, color: Colors.white, size: 20),
+                  ),
+                  if (_unreadCount > 0)
+                    Positioned(
+                      top: -2, right: -2,
+                      child: Container(
+                        padding: const EdgeInsets.all(3),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFFF4D4D),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Text(
+                          _unreadCount > 9 ? '9+' : '$_unreadCount',
+                          style: const TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.w800),
+                        ),
+                      ),
+                    ),
+                ],
               ),
             ),
           ],
@@ -606,20 +641,24 @@ class _MySmallGroupSheetState extends State<_MySmallGroupSheet> {
   }
 
   Future<void> _load() async {
-    final uid = _client.auth.currentUser?.id;
-    if (uid == null) { if (mounted) setState(() => _loading = false); return; }
-    final memberships = await _client
-        .from('cell_group_members')
-        .select('cell_group_id, cell_groups(id, name)')
-        .eq('user_id', uid);
-    if (mounted) {
-      setState(() {
-        _groups = memberships
-            .map((m) => m['cell_groups'] as Map<String, dynamic>? ?? {})
-            .where((g) => g.isNotEmpty)
-            .toList();
-        _loading = false;
-      });
+    try {
+      final uid = _client.auth.currentUser?.id;
+      if (uid == null) { if (mounted) setState(() => _loading = false); return; }
+      final memberships = await _client
+          .from('cell_group_members')
+          .select('cell_group_id, cell_groups(id, name)')
+          .eq('user_id', uid);
+      if (mounted) {
+        setState(() {
+          _groups = memberships
+              .map((m) => m['cell_groups'] as Map<String, dynamic>? ?? {})
+              .where((g) => g.isNotEmpty)
+              .toList();
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _groups = []; _loading = false; });
     }
   }
 
@@ -668,7 +707,7 @@ class _MySmallGroupSheetState extends State<_MySmallGroupSheet> {
                   ],
                 ),
               )
-            else
+            else ...[
               ...(_groups.map((g) => GestureDetector(
                 onTap: () => widget.onEnter(g['id'] as String, g['name'] as String? ?? ''),
                 child: Container(
@@ -694,7 +733,156 @@ class _MySmallGroupSheetState extends State<_MySmallGroupSheet> {
                   ),
                 ),
               ))),
+              const SizedBox(height: 4),
+              Builder(builder: (ctx) => GestureDetector(
+                onTap: () => _showCreateGroupSheet(ctx),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: const Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.add_rounded, color: AC.muted, size: 16),
+                      SizedBox(width: 6),
+                      Text('소그룹 추가하기', style: TextStyle(color: AC.muted, fontSize: 13, fontWeight: FontWeight.w600)),
+                    ],
+                  ),
+                ),
+              )),
+            ],
           ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── 알림 페이지 ──────────────────────────────────────────────────────────────
+class _NotificationsPageMain extends StatefulWidget {
+  final NotificationRepository notifRepo;
+  const _NotificationsPageMain({required this.notifRepo});
+
+  @override
+  State<_NotificationsPageMain> createState() => _NotificationsPageMainState();
+}
+
+class _NotificationsPageMainState extends State<_NotificationsPageMain> {
+  List<Map<String, dynamic>> _notifs = [];
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    try {
+      final result = await widget.notifRepo.getNotifications();
+      if (mounted) setState(() { _notifs = result; _loading = false; });
+    } catch (_) {
+      if (mounted) setState(() { _notifs = []; _loading = false; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF06030F),
+      body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xFF120D20), Color(0xFF06030F)],
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 8, 14, 0),
+                child: Row(
+                  children: [
+                    GestureDetector(
+                      onTap: () => Navigator.pop(context),
+                      child: Glass(
+                        radius: 999,
+                        padding: const EdgeInsets.all(10),
+                        child: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 16),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    const Text('알림',
+                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Colors.white)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              if (_loading)
+                const Expanded(child: Center(child: CircularProgressIndicator()))
+              else if (_notifs.isEmpty)
+                const Expanded(
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.notifications_off_outlined, size: 48, color: AC.muted),
+                        SizedBox(height: 12),
+                        Text('알림이 없습니다', style: TextStyle(color: AC.muted, fontSize: 14)),
+                      ],
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: ListView.separated(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                    itemCount: _notifs.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (_, i) {
+                      final notif = _notifs[i];
+                      final message = notif['message'] as String? ?? '';
+                      final isRead = notif['is_read'] as bool? ?? false;
+                      final type = notif['type'] as String? ?? '';
+                      final isInvite = type == 'partner_invite';
+                      return Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: isRead ? const Color(0xCC14102A) : const Color(0xFF1E1840),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: isRead ? Colors.white12 : AC.light.withOpacity(0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              isInvite ? Icons.people_rounded : Icons.favorite_rounded,
+                              size: 16,
+                              color: isInvite ? const Color(0xFFB39DDB) : AC.glass1,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(message,
+                                  style: const TextStyle(fontSize: 13, color: Color(0xFFE9E4FF), height: 1.5)),
+                            ),
+                            if (!isRead)
+                              Container(
+                                width: 6, height: 6,
+                                decoration: const BoxDecoration(color: Color(0xFFFF4D4D), shape: BoxShape.circle),
+                              ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
     );

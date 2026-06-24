@@ -100,4 +100,44 @@ class CellGroupRepository {
       'user_id': _uid,
     });
   }
+
+  Future<List<Map<String, dynamic>>> getFeed(String cellGroupId) async {
+    final notices = await getNotices(cellGroupId);
+    final sharing = await getSharing(cellGroupId);
+    final feed = [
+      ...notices.map((n) => {...n, '_type': 'notice'}),
+      ...sharing.map((s) => {...s, '_type': 'sharing'}),
+    ];
+    feed.sort((a, b) {
+      final aDate = a['created_at'] as String? ?? '';
+      final bDate = b['created_at'] as String? ?? '';
+      return bDate.compareTo(aDate);
+    });
+    return feed;
+  }
+
+  Future<List<Map<String, dynamic>>> getChurchMembersNotInGroup(String cellGroupId) async {
+    final churchId = await _getChurchId();
+    if (churchId == null || _uid == null) return [];
+    final members = await _client
+        .from('cell_group_members')
+        .select('user_id')
+        .eq('cell_group_id', cellGroupId);
+    final memberIds = members.map((m) => m['user_id'] as String).toSet();
+    final allUsers = await _client
+        .from('users')
+        .select('id, nickname')
+        .eq('church_id', churchId)
+        .neq('id', _uid!);
+    return List<Map<String, dynamic>>.from(allUsers)
+        .where((u) => !memberIds.contains(u['id'] as String))
+        .toList();
+  }
+
+  Future<void> inviteMember(String cellGroupId, String userId) async {
+    await _client.from('cell_group_members').upsert({
+      'cell_group_id': cellGroupId,
+      'user_id': userId,
+    });
+  }
 }

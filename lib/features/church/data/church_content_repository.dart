@@ -51,4 +51,29 @@ class ChurchContentRepository {
         .eq('church_id', churchId)
         .order('date', ascending: false);
   }
+
+  Future<List<Map<String, dynamic>>> getWorshipNotes() async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return [];
+    return await _client
+        .from('worship_notes')
+        .select()
+        .eq('user_id', uid)
+        .order('created_at', ascending: false);
+  }
+
+  Future<void> saveWorshipNote(String content) async {
+    final uid = _client.auth.currentUser?.id;
+    if (uid == null) return;
+    final churchId = await _getChurchId();
+    await _client.from('worship_notes').insert({
+      'user_id': uid,
+      'church_id': churchId,
+      'content': content,
+    });
+  }
+
+  Future<void> deleteWorshipNote(String id) async {
+    await _client.from('worship_notes').delete().eq('id', id);
+  }
 }
