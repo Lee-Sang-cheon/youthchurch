@@ -62,6 +62,9 @@ class _MyPageState extends State<MyPage> {
     );
     if (confirmed == true) {
       await _client.auth.signOut();
+      if (mounted) {
+        Navigator.of(context).popUntil((route) => route.isFirst);
+      }
     }
   }
 

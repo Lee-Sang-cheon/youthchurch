@@ -6,7 +6,8 @@ import '../data/cell_group_repository.dart';
 import '../data/church_presence_service.dart';
 import '../domain/avatar_user.dart';
 import 'widgets/avatar_widgets.dart';
-import 'my_page.dart';
+import '../../home/presentation/challenge_tab.dart';
+import 'group_photo_feed.dart';
 
 // ─── 셀그룹 목록 시트 ──────────────────────────────────────
 
@@ -30,16 +31,20 @@ class _SmallGroupListSheetState extends State<SmallGroupListSheet> {
   }
 
   Future<void> _load() async {
-    final results = await Future.wait([
-      _repo.getCellGroups(),
-      _repo.getMyCellGroupId(),
-    ]);
-    if (mounted) {
-      setState(() {
-        _groups = results[0] as List<Map<String, dynamic>>;
-        _myCellGroupId = results[1] as String?;
-        _loading = false;
-      });
+    try {
+      final results = await Future.wait([
+        _repo.getCellGroups(),
+        _repo.getMyCellGroupId(),
+      ]);
+      if (mounted) {
+        setState(() {
+          _groups = results[0] as List<Map<String, dynamic>>;
+          _myCellGroupId = results[1] as String?;
+          _loading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _loading = false);
     }
   }
 
@@ -583,9 +588,7 @@ class _SmallGroupRoomPageState extends State<SmallGroupRoomPage> {
               child: Stack(
                 children: [
                   const Positioned.fill(child: _SmallGroupBg()),
-                  for (var i = 0; i < _onlineUsers.length; i++)
-                    _buildUserAvatar(_onlineUsers[i], constraints, i),
-                  _buildSelfAvatar(constraints),
+                  ..._buildPerspectiveSortedAvatars(constraints),
                 ],
               ),
             ),
@@ -597,24 +600,46 @@ class _SmallGroupRoomPageState extends State<SmallGroupRoomPage> {
     );
   }
 
+  double _perspectiveScale(double yPct) {
+    final t = ((yPct - 15) / (88 - 15)).clamp(0.0, 1.0);
+    return 0.55 + 0.65 * t;
+  }
+
   Widget _buildUserAvatar(AvatarUser user, BoxConstraints c, int index) {
+    final scale = _perspectiveScale(user.y);
     final x = user.x / 100 * c.maxWidth;
     final y = user.y / 100 * c.maxHeight;
     return Positioned(
       left: x - 30, top: y - 40,
-      child: AvatarFigure(user: user, seed: index),
+      child: AvatarFigure(user: user.copyWith(scale: scale), seed: index),
     );
   }
 
   Widget _buildSelfAvatar(BoxConstraints c) {
+    final scale = _perspectiveScale(_selfY);
     final x = _selfX / 100 * c.maxWidth;
     final y = _selfY / 100 * c.maxHeight;
     return AnimatedPositioned(
+      key: const ValueKey('self'),
       duration: const Duration(milliseconds: 320),
       curve: Curves.easeOutCubic,
       left: x - 30, top: y - 80,
-      child: SelfAvatar(nickname: _myNickname),
+      child: Transform.scale(
+        scale: scale,
+        alignment: Alignment.bottomCenter,
+        child: SelfAvatar(nickname: _myNickname),
+      ),
     );
+  }
+
+  List<Widget> _buildPerspectiveSortedAvatars(BoxConstraints c) {
+    final items = <(double y, Widget w)>[];
+    for (var i = 0; i < _onlineUsers.length; i++) {
+      items.add((_onlineUsers[i].y, _buildUserAvatar(_onlineUsers[i], c, i)));
+    }
+    items.add((_selfY, _buildSelfAvatar(c)));
+    items.sort((a, b) => a.$1.compareTo(b.$1));
+    return items.map((e) => e.$2).toList();
   }
 
   Widget _buildTopBar() {
@@ -674,9 +699,16 @@ class _SmallGroupRoomPageState extends State<SmallGroupRoomPage> {
             _NavItem(icon: Icons.menu_book_rounded, label: '나눔지', onTap: _showSharing),
             _NavItem(icon: Icons.people_rounded, label: '구성원', onTap: _showMemberSheet),
             _NavItem(
-              icon: Icons.person_rounded,
-              label: '마이페이지',
-              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const MyPage())),
+              icon: Icons.photo_camera_rounded,
+              label: '순간',
+              onTap: () => Navigator.push(context, MaterialPageRoute(
+                builder: (_) => _GroupMomentPage(cellGroupId: widget.cellGroupId, groupName: widget.groupName),
+              )),
+            ),
+            _NavItem(
+              icon: Icons.emoji_events_rounded,
+              label: '챌린지',
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ChallengeTab())),
             ),
           ],
         ),
@@ -1533,6 +1565,37 @@ class _SmallGroupBg extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+// ─── 순간 공유 페이지 ─────────────────────────────────────────
+
+class _GroupMomentPage extends StatelessWidget {
+  final String cellGroupId;
+  final String groupName;
+  const _GroupMomentPage({required this.cellGroupId, required this.groupName});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF080512),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 18),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('순간 공유', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700)),
+            Text(groupName, style: const TextStyle(color: AC.muted, fontSize: 11)),
+          ],
+        ),
+      ),
+      body: GroupPhotoFeed(cellGroupId: cellGroupId),
     );
   }
 }

@@ -164,8 +164,20 @@ class _ChallengeTabState extends State<ChallengeTab> {
 
   @override
   Widget build(BuildContext context) {
+    final canPop = Navigator.canPop(context);
     return Scaffold(
-      backgroundColor: Colors.transparent,
+      backgroundColor: const Color(0xFF080512),
+      appBar: canPop
+          ? AppBar(
+              backgroundColor: Colors.transparent,
+              elevation: 0,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back_ios_new_rounded, color: Colors.white, size: 18),
+                onPressed: () => Navigator.pop(context),
+              ),
+              title: const Text('챌린지', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w700)),
+            )
+          : null,
       floatingActionButton: FloatingActionButton(
         onPressed: _showCreateChallenge,
         backgroundColor: AC.glass1,

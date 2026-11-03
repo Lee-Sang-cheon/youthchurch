@@ -1,5 +1,6 @@
-import 'package:app_links/app_links.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/supabase/supabase_config.dart';
 import 'features/auth/data/user_repository.dart';
@@ -10,18 +11,16 @@ import 'features/church/presentation/church_hall_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  KakaoSdk.init(nativeAppKey: 'af55d662743a1a77afe35158024c3aa8');
   await Supabase.initialize(
     url: SupabaseConfig.url,
     anonKey: SupabaseConfig.anonKey,
+    authOptions: const FlutterAuthClientOptions(
+      authFlowType: AuthFlowType.pkce,
+    ),
   );
 
-  // 딥링크로 들어오는 OAuth 콜백 처리
-  final appLinks = AppLinks();
-  appLinks.uriLinkStream.listen((uri) {
-    Supabase.instance.client.auth.getSessionFromUrl(uri);
-  });
-
-  runApp(const YouthChurchApp());
+  runApp(const ProviderScope(child: YouthChurchApp()));
 }
 
 class YouthChurchApp extends StatelessWidget {

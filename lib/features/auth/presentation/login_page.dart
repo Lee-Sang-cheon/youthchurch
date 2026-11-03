@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:crypto/crypto.dart';
 import 'package:flutter/material.dart';
 import 'package:google_sign_in/google_sign_in.dart';
+import 'package:kakao_flutter_sdk_user/kakao_flutter_sdk_user.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 class LoginPage extends StatefulWidget {
@@ -70,6 +71,31 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+
+  Future<void> _signInWithKakao() async {
+    setState(() => _isLoading = true);
+    try {
+      final rawNonce = _generateNonce();
+      final hashedNonce = _sha256ofString(rawNonce);
+
+      OAuthToken token;
+      if (await isKakaoTalkInstalled()) {
+        token = await UserApi.instance.loginWithKakaoTalk(nonce: hashedNonce);
+      } else {
+        token = await UserApi.instance.loginWithKakaoAccount(nonce: hashedNonce);
+      }
+
+      await _supabase.auth.signInWithIdToken(
+        provider: OAuthProvider.kakao,
+        idToken: token.idToken!,
+        nonce: rawNonce,
+      );
+    } catch (e) {
+      if (mounted) _showError('카카오 로그인 실패: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
   Future<void> _submitEmail() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text.trim();
@@ -158,6 +184,30 @@ class _LoginPageState extends State<LoginPage> {
                     style: OutlinedButton.styleFrom(
                       backgroundColor: Colors.white,
                       side: const BorderSide(color: Colors.grey),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+                // 카카오 로그인
+                SizedBox(
+                  width: double.infinity,
+                  height: 50,
+                  child: ElevatedButton.icon(
+                    onPressed: _isLoading ? null : _signInWithKakao,
+                    icon: const Text('💬', style: TextStyle(fontSize: 18)),
+                    label: const Text(
+                      '카카오로 로그인',
+                      style: TextStyle(
+                        color: Color(0xFF3C1E1E),
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFFFEE500),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8),
                       ),

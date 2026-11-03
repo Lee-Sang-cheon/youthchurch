@@ -14,9 +14,10 @@ import 'album_page.dart';
 import 'schedule_page.dart';
 import 'members_page.dart';
 import 'my_page.dart';
+import 'playground_page.dart';
 import '../domain/avatar_user.dart';
-import 'widgets/church_scene_bg.dart';
 import 'widgets/avatar_widgets.dart';
+import 'church_webview_scene.dart';
 
 class ChurchHallPage extends StatefulWidget {
   const ChurchHallPage({super.key});
@@ -27,16 +28,12 @@ class ChurchHallPage extends StatefulWidget {
 
 class _ChurchHallPageState extends State<ChurchHallPage> {
   int _navIndex = 0;
-  int? _selectedUserId;
   String? _myLatestPrayer;
   List<AvatarUser> _onlineUsers = [];
   int _unreadCount = 0;
   final _presence = ChurchPresenceService();
   final _notifRepo = NotificationRepository();
-
-  // 내 아바타 위치 (화면 % 기준, 0~100)
-  double _selfX = 50;
-  double _selfY = 74;
+  final _sceneKey = GlobalKey<ChurchWebViewSceneState>();
 
   @override
   void initState() {
@@ -59,11 +56,14 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
     await _presence.join(
       nickname: _myNickname,
       prayer: _myLatestPrayer,
-      x: _selfX,
-      y: _selfY,
+      x: 50,
+      y: 50,
     );
     _presence.usersStream.listen((users) {
-      if (mounted) setState(() => _onlineUsers = users);
+      if (mounted) {
+        setState(() => _onlineUsers = users);
+        _sceneKey.currentState?.updateOtherUsers(users);
+      }
     });
   }
 
@@ -78,21 +78,7 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
     return user?.userMetadata?['nickname'] as String? ?? '나';
   }
 
-  void _onTapBackground(TapDownDetails details, BoxConstraints constraints) {
-    final x = details.localPosition.dx / constraints.maxWidth * 100;
-    final y = details.localPosition.dy / constraints.maxHeight * 100;
-    // 바닥 영역만 이동 허용
-    if (y < 35 || y > 88) return;
-    setState(() {
-      _selfX = x.clamp(8, 92);
-      _selfY = y.clamp(35, 88);
-      _selectedUserId = null;
-    });
-    _presence.updatePosition(_selfX, _selfY); // throttled 500ms
-  }
-
   void _onGreet(AvatarUser user, String emoji) {
-    // 인사 리액션 표시 (추후 실시간 연동)
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('$emoji ${user.name}에게 인사했어요!'),
@@ -105,11 +91,19 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AC.bgBot,
+      backgroundColor: const Color(0xFF080512),
       body: Stack(
         fit: StackFit.expand,
         children: [
-          _buildScene(),
+          // Three.js WebView 3D 씬
+          ChurchWebViewScene(
+            key: _sceneKey,
+            playerName: _myNickname,
+            playerColor: const Color(0xFFFFB44D),
+            onMove: (x, y) => _presence.updatePosition(x, y),
+          ),
+          // 포탈 오버레이
+          Positioned.fill(child: _buildPortalOverlay()),
           Positioned(top: 0, left: 0, right: 0, child: _buildTopBar()),
           _buildBottomNav(),
         ],
@@ -117,106 +111,78 @@ class _ChurchHallPageState extends State<ChurchHallPage> {
     );
   }
 
-  Widget _buildScene() {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        return GestureDetector(
-          onTapDown: (details) => _onTapBackground(details, constraints),
-          child: Stack(
-            children: [
-              // 교회 배경
-              const Positioned.fill(child: ChurchScene()),
-
-              // 포탈 (문)
-              Positioned.fill(child: _buildPortals(constraints)),
-
-              // 다른 유저 아바타 (실시간)
-              for (var i = 0; i < _onlineUsers.length; i++)
-                _buildUserAvatar(_onlineUsers[i], constraints, i),
-
-              // 내 아바타
-              _buildSelfAvatar(constraints),
-
-              // 힌트 텍스트
-              Positioned(
-                left: 0,
-                right: 0,
-                bottom: constraints.maxHeight * 0.12,
-                child: const IgnorePointer(
-                  child: Text(
-                    '바닥을 탭하면 이동해요 · 아바타를 탭해 인사하기',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      color: AC.muted,
-                      shadows: [Shadow(color: Color(0xCC000000), blurRadius: 6)],
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildUserAvatar(AvatarUser user, BoxConstraints c, int index) {
-    final x = user.x / 100 * c.maxWidth;
-    final y = user.y / 100 * c.maxHeight;
-    return Positioned(
-      left: x - 30,
-      top: y - 40,
-      child: AvatarFigure(
-        user: user,
-        seed: index,
-        selected: _selectedUserId == user.id,
-        onTap: () {
-          setState(() => _selectedUserId = user.id);
-          showProfileSheet(context, user, _onGreet);
-        },
-      ),
-    );
-  }
-
-  Widget _buildSelfAvatar(BoxConstraints c) {
-    final x = _selfX / 100 * c.maxWidth;
-    final y = _selfY / 100 * c.maxHeight;
-    return AnimatedPositioned(
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeOutCubic,
-      left: x - 30,
-      top: y - 80,
-      child: SelfAvatar(
-        nickname: _myNickname,
-        prayer: _myLatestPrayer,
-        onTap: () => showSelfProfileSheet(context, _myNickname),
-      ),
-    );
-  }
-
-  Widget _buildPortals(BoxConstraints constraints) {
-    final w = constraints.maxWidth;
-    final h = constraints.maxHeight;
-    final portals = [
-      _PortalData(label: '기도실', icon: Icons.arrow_back_ios_new_rounded, hue: AC.glass1, xPct: 0.12, yPct: 0.50, onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrayerRoomPage()))),
-      _PortalData(label: '예배당', icon: Icons.arrow_forward_ios_rounded, hue: AC.light, xPct: 0.88, yPct: 0.50, onTap: () => _enterWorshipHall()),
-      _PortalData(label: '소그룹', icon: Icons.keyboard_arrow_down_rounded, hue: AC.glass2, xPct: 0.50, yPct: 0.20, onTap: () => _showMySmallGroups()),
-    ];
-    return Stack(
-      children: [
-        for (final p in portals)
+  // 포탈 버튼 오버레이 (화면 4방향 가장자리에 배치)
+  Widget _buildPortalOverlay() {
+    return SafeArea(
+      child: Stack(
+        children: [
+          // 기도실 - 좌측 중앙
           Positioned(
-            left: p.xPct * w - 36,
-            bottom: p.yPct * h,
-            child: _RoomButton(
-              label: p.label,
-              icon: p.icon,
-              hue: p.hue,
-              onTap: p.onTap ?? () => _showComingSoon(p.label),
+            left: 12,
+            top: 0,
+            bottom: 80,
+            child: Center(
+              child: _PortalButton(
+                label: '기도실',
+                hue: AC.glass1,
+                icon: Icons.self_improvement_rounded,
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrayerRoomPage())),
+              ),
             ),
           ),
-      ],
+          // 예배당 - 우측 중앙
+          Positioned(
+            right: 12,
+            top: 0,
+            bottom: 80,
+            child: Center(
+              child: _PortalButton(
+                label: '예배당',
+                hue: AC.light,
+                icon: Icons.music_note_rounded,
+                onTap: _enterWorshipHall,
+              ),
+            ),
+          ),
+          // 놀이터 - 상단 좌측
+          Positioned(
+            left: 72,
+            top: 70,
+            child: _PortalButton(
+              label: '놀이터',
+              hue: const Color(0xFF4CAF50),
+              icon: Icons.sports_esports_rounded,
+              onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PlaygroundPage())),
+            ),
+          ),
+          // 소그룹 - 상단 우측
+          Positioned(
+            right: 72,
+            top: 70,
+            child: _PortalButton(
+              label: '소그룹',
+              hue: AC.glass2,
+              icon: Icons.groups_rounded,
+              onTap: _showMySmallGroups,
+            ),
+          ),
+          // 이동 힌트
+          const Positioned(
+            left: 0, right: 0, bottom: 90,
+            child: IgnorePointer(
+              child: Text(
+                '바닥 타일을 탭해서 이동해요',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AC.muted,
+                  shadows: [Shadow(color: Color(0xCC000000), blurRadius: 6)],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -451,52 +417,121 @@ class _NavItem {
   const _NavItem({required this.icon, required this.label});
 }
 
-class _PortalData {
+
+class _PortalButton extends StatefulWidget {
   final String label;
-  final IconData icon;
   final Color hue;
-  final double xPct, yPct;
-  final VoidCallback? onTap;
-  const _PortalData({
-    required this.label,
-    required this.icon,
-    required this.hue,
-    required this.xPct,
-    required this.yPct,
-    this.onTap,
-  });
+  final IconData icon;
+  final VoidCallback onTap;
+  const _PortalButton({required this.label, required this.hue, required this.icon, required this.onTap});
+
+  @override
+  State<_PortalButton> createState() => _PortalButtonState();
 }
 
-class _RoomButton extends StatelessWidget {
-  final String label;
-  final IconData icon;
-  final Color hue;
-  final VoidCallback onTap;
-  const _RoomButton({required this.label, required this.icon, required this.hue, required this.onTap});
+class _PortalButtonState extends State<_PortalButton> with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _pulse;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: const Duration(milliseconds: 1800))
+      ..repeat(reverse: true);
+    _pulse = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: const Color(0xBB0E0B1A),
-          borderRadius: BorderRadius.circular(999),
-          border: Border.all(color: hue.withOpacity(0.5), width: 1.2),
-          boxShadow: [BoxShadow(color: hue.withOpacity(0.3), blurRadius: 14)],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 13, color: hue),
-            const SizedBox(width: 5),
-            Text(
-              label,
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: hue),
+      onTap: widget.onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          AnimatedBuilder(
+            animation: _pulse,
+            builder: (_, __) {
+              final p = _pulse.value;
+              return Stack(
+                alignment: Alignment.center,
+                children: [
+                  // 외부 글로우
+                  Container(
+                    width: 72,
+                    height: 72,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: widget.hue.withOpacity(0.35 + 0.2 * p),
+                          blurRadius: 24 + 12 * p,
+                          spreadRadius: 2 + 4 * p,
+                        ),
+                        BoxShadow(
+                          color: widget.hue.withOpacity(0.15 + 0.1 * p),
+                          blurRadius: 48 + 16 * p,
+                          spreadRadius: 4,
+                        ),
+                      ],
+                    ),
+                  ),
+                  // 오브 본체
+                  Container(
+                    width: 56,
+                    height: 56,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      gradient: RadialGradient(
+                        center: const Alignment(-0.25, -0.3),
+                        radius: 1.1,
+                        colors: [
+                          Colors.white.withOpacity(0.95),
+                          widget.hue,
+                          widget.hue.withOpacity(0.55),
+                        ],
+                        stops: const [0.0, 0.45, 1.0],
+                      ),
+                    ),
+                    child: Icon(widget.icon, color: Colors.white, size: 24,
+                      shadows: [Shadow(color: Colors.black26, blurRadius: 4)]),
+                  ),
+                  // 하이라이트 반짝이
+                  Positioned(
+                    top: 10,
+                    left: 15,
+                    child: Container(
+                      width: 13,
+                      height: 7,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(6),
+                        color: Colors.white.withOpacity(0.55 + 0.2 * p),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+          const SizedBox(height: 7),
+          Text(
+            widget.label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w800,
+              color: Colors.white,
+              shadows: [
+                Shadow(color: widget.hue.withOpacity(0.9), blurRadius: 10),
+                Shadow(color: widget.hue.withOpacity(0.4), blurRadius: 24),
+              ],
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
